@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>深江球転がしコンペ【幹事長室】</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #edeef0; margin: 0; padding: 15px; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; font-size: 1.4rem; color: #2c3e50; margin-bottom: 5px; }
+        p.subtitle { text-align: center; font-size: 0.85rem; color: #7f8c8d; margin-top: 0; margin-bottom: 15px; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        textarea { width: 100%; height: 120px; padding: 10px; box-sizing: border-box; border: 2px solid #3498db; border-radius: 6px; font-size: 0.9rem; resize: vertical; }
+        
+        .btn-add { display: block; width: 100%; background: #3498db; color: white; text-align: center; padding: 12px 0; border: none; border-radius: 6px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 5px; }
+        .btn-add:hover { background: #2980b9; }
+        
+        .summary-cards { display: flex; gap: 10px; margin: 20px 0; }
+        .card { flex: 1; background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; text-align: center; }
+        .card .title { font-size: 0.75rem; color: #7f8c8d; font-weight: bold; }
+        .card .value { font-size: 1.2rem; font-weight: bold; color: #2c3e50; margin-top: 5px; }
+        .card.total-money { background: #e8f8f5; border-color: #a3e4d7; }
+        .card.total-money .value { color: #16a085; }
+
+        .list-title { font-size: 1rem; font-weight: bold; margin-top: 25px; margin-bottom: 10px; color: #2c3e50; border-left: 4px solid #16a085; padding-left: 8px; }
+        
+        .bet-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
+        .bet-table th, .bet-table td { border: 1px solid #edf2f7; padding: 10px 8px; text-align: left; }
+        .bet-table th { background: #f1f5f9; color: #4a5568; }
+        .bet-table tr:hover { background-color: #fcfcfc; }
+        
+        .btn-del { background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; }
+        .btn-clear { background: #7f8c8d; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-size: 0.8rem; cursor: pointer; display: block; margin: 20px auto 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>深江球転がしコンペ【幹事長室】</h1>
+    <p class="subtitle">LINEの買い目をコピペで自動集計システム 📊</p>
+
+    <!-- コピペエリア -->
+    <div class="form-group">
+        <label for="rawText">LINEからコピーした文章をそのまま貼り付け</label>
+        <textarea id="rawText" placeholder="メンバーからLINEに飛んできた「【深江球転がしコンペ】…」のメッセージを丸ごとここにペーストしてください。"></textarea>
+        <button class="btn-add" onclick="processLineMessage()">➕ 買い目をリストに追加・更新</button>
+    </div>
+
+    <!-- 集計ダッシュボード -->
+    <div class="summary-cards">
+        <div class="card">
+            <div class="title">投票人数</div>
+            <div class="value" id="totalPeople">0 人</div>
+        </div>
+        <div class="card">
+            <div class="title">総点数</div>
+            <div class="value" id="totalCombos">0 点</div>
+        </div>
+        <div class="card total-money">
+            <div class="title">コンペ総売上</div>
+            <div class="value" id="totalCost">¥0</div>
+        </div>
+    </div>
+
+    <!-- 参加者一覧リスト -->
+    <div class="list-title">👥 現在の集計済みメンバー一覧</div>
+    <table class="bet-table">
+        <thead>
+            <tr>
+                <th>購入者</th>
+                <th>買い目概要</th>
+                <th>合計金額</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="summaryTableBody">
+            <tr>
+                <td colspan="4" style="text-align:center; color:#95a5a6; padding: 20px;">まだデータがありません。上のエリアにLINEをコピペしてください。</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <button class="btn-clear" onclick="clearAllData()">全データをリセット</button>
+</div>
+
+<script>
+    // ブラウザにデータを保存しておくためのキー
+    const STORAGE_KEY = 'fukae_golf_summary_data';
+    let MasterList = [];
+
+    // 起動時に保存データがあれば読み込む
+    window.onload = function() {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+            MasterList = JSON.parse(stored);
+            renderTable();
+        }
+    };
+
+    // LINEのメッセージを解析するメイン処理
+    function processLineMessage() {
+        const text = document.getElementById('rawText').value.trim();
+        if (!text) { alert("テキストが空っぽです！"); return; }
+
+        // 購入者の抽出
+        const nameMatch = text.match(/■購入者：([^\n]+)/);
+        if (!nameMatch) {
+            alert("エラー: 購入者（■購入者：〇〇）が見つかりません。メッセージが正しいか確認してください。");
+            return;
+        }
+        const buyerName = nameMatch[1].trim();
+
+        // 金額の抽出
+        const costMatch = text.match(/■(?:総合計|合計)金額：([0-9,]+)/);
+        if (!costMatch) {
+            alert("エラー: 合計金額が見つかりません。");
+            return;
+        }
+        const totalCost = parseInt(costMatch[1].replace(/,/g, ''));
+
+        // 点数の計算（「計 X点」をすべて探して合計する）
+        const comboMatches = [...text.matchAll(/計\s*([0-9]+)\s*点/g)];
+        let totalCombos = 0;
+        if (comboMatches.length > 0) {
+            comboMatches.forEach(m => totalCombos += parseInt(m[1]));
+        }
+
+        // 買い目の詳細部分をそれっぽく抽出
+        let details = [];
+        const lines = text.split('\n');
+        let record = false;
+        for (let line of lines) {
+            if (line.includes('＜買い目')) { record = true; continue; }
+            if (line.includes('===') || line.includes('■総合計金額')) { record = false; }
+            if (record && line.trim() && !line.includes('■ 各')) {
+                details.push(line.trim());
+            }
+        }
+        // シンプルな形式（買い目#1とかがない旧バージョン）の救済
+        if (details.length === 0) {
+            const fallbackMatch = text.match(/(?:通常|BOX|【1着】)[^■]*/s);
+            if (fallbackMatch) {
+                details = fallbackMatch[0].trim().split('\n').map(l => l.trim()).filter(l => l);
+            }
+        }
+
+        const summaryText = details.length > 0 ? details.join(' / ') : "馬単詳細データ";
+
+        // すでに同じ名前の人がいる場合は上書き、いなければ新規追加
+        const existingIndex = MasterList.findIndex(item => item.name === buyerName);
+        if (existingIndex !== -1) {
+            if (confirm(`${buyerName}さんは既にリストに存在します。新しい内容で【更新】しますか？`)) {
+                MasterList[existingIndex] = {
+                    name: buyerName,
+                    summary: summaryText,
+                    combos: totalCombos,
+                    cost: totalCost
+                };
+            } else { return; }
+        } else {
+            MasterList.push({
+                name: buyerName,
+                summary: summaryText,
+                combos: totalCombos,
+                cost: totalCost
+            });
+        }
+
+        // データの保存と画面更新
+        saveAndRefresh();
+        document.getElementById('rawText').value = ""; // 入力欄をクリア
+    }
+
+    // 1件削除
+    function deleteItem(index) {
+        MasterList.splice(index, 1);
+        saveAndRefresh();
+    }
+
+    // 全クリア
+    function clearAllData() {
+        if (confirm("本当に全員のデータを削除してリセットしますか？")) {
+            MasterList = [];
+            saveAndRefresh();
+        }
+    }
+
+    function saveAndRefresh() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(MasterList));
+        renderTable();
+    }
+
+    // 画面のテーブルとダッシュボードを再描画
+    function renderTable() {
+        const tbody = document.getElementById('summaryTableBody');
+        
+        if (MasterList.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#95a5a6; padding: 20px;">まだデータがありません。上のエリアにLINEをコピペしてください。</td></tr>`;
+            document.getElementById('totalPeople').innerText = "0 人";
+            document.getElementById('totalCombos').innerText = "0 点";
+            document.getElementById('totalCost').innerText = "¥0";
+            return;
+        }
+
+        tbody.innerHTML = "";
+        let aggregateCombos = 0;
+        let aggregateCost = 0;
+
+        MasterList.forEach((item, index) => {
+            aggregateCombos += item.combos;
+            aggregateCost += item.cost;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-weight:bold; color:#2c3e50;">${item.name}</td>
+                <td style="color:#555; font-size:0.8rem; max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.summary}">${item.summary}</td>
+                <td style="font-weight:bold; color:#16a085;">¥${item.cost.toLocaleString()}</td>
+                <td><button class="btn-del" onclick="deleteItem(${index})">削除</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // ダッシュボード数字更新
+        document.getElementById('totalPeople').innerText = `${MasterList.length} 人`;
+        document.getElementById('totalCombos').innerText = `${aggregateCombos} 点`;
+        document.getElementById('totalCost').innerText = `¥${aggregateCost.toLocaleString()}`;
+    }
+</script>
+
+</body>
+</html>
